@@ -1,0 +1,9 @@
+.git
+.github
+build
+dist
+data
+.env
+*.dpapi
+client.json
+__pycache__

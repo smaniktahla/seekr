@@ -1,0 +1,25 @@
+services:
+  archive-search:
+    build: .
+    image: nas-archive-search:pilot
+    container_name: archive-search
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${ARCHIVE_BIND_IP:-127.0.0.1}:8093:8093"
+    env_file: .env
+    environment:
+      ARCHIVE_DB: /data/archive.sqlite
+      EMBEDDING_URL: ${EMBEDDING_URL:-http://host.docker.internal:11434}
+    volumes:
+      - ${ARCHIVE_DATA_ROOT:-/mnt/tank}/Documents:/archive/Documents:ro
+      - ${ARCHIVE_DATA_ROOT:-/mnt/tank}/Pictures:/archive/Pictures:ro
+      - ${ARCHIVE_DATA_ROOT:-/mnt/tank}/Music:/archive/Music:ro
+      - ${ARCHIVE_DATA_ROOT:-/mnt/tank}/Videos:/archive/Videos:ro
+      - ./data:/data
+    mem_limit: 1536m
+    cpus: 1.5
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
