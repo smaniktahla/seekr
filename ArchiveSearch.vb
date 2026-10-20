@@ -14,6 +14,8 @@ Imports System.Threading.Tasks
 Public Class SearchWindow
     Inherits Form
     Private ReadOnly query As New TextBox()
+    Private ReadOnly clearQueryButton As New Button()
+    Private ReadOnly searchToolTip As New ToolTip()
     Private ReadOnly category As New ComboBox()
     Private ReadOnly share As New ComboBox()
     Private ReadOnly mode As New ComboBox()
@@ -71,8 +73,21 @@ Public Class SearchWindow
         layout.Controls.Add(heading,0,0)
         Dim bar As New TableLayoutPanel With {.Dock=DockStyle.Fill,.ColumnCount=2}
         bar.ColumnStyles.Add(New ColumnStyle(SizeType.Percent,100)) : bar.ColumnStyles.Add(New ColumnStyle(SizeType.Absolute,110))
-        query.Dock=DockStyle.Fill : searchButton.Text="Search" : searchButton.Dock=DockStyle.Fill
-        bar.Controls.Add(query,0,0) : bar.Controls.Add(searchButton,1,0) : layout.Controls.Add(bar,0,1)
+        Dim queryBar As New TableLayoutPanel With {.Dock=DockStyle.Fill,.ColumnCount=2,.RowCount=1,.BackColor=Color.White,.BorderStyle=BorderStyle.FixedSingle,.Padding=New Padding(5,3,2,3)}
+        queryBar.ColumnStyles.Add(New ColumnStyle(SizeType.Percent,100))
+        queryBar.ColumnStyles.Add(New ColumnStyle(SizeType.Absolute,30))
+        query.Dock=DockStyle.Fill : query.BorderStyle=BorderStyle.None
+        clearQueryButton.Text=ChrW(&HD7) : clearQueryButton.Dock=DockStyle.Fill
+        clearQueryButton.FlatStyle=FlatStyle.Flat : clearQueryButton.FlatAppearance.BorderSize=0
+        clearQueryButton.Margin=New Padding(0) : clearQueryButton.Font=New Font("Segoe UI",12)
+        clearQueryButton.AccessibleName="Clear search" : clearQueryButton.Enabled=False
+        searchToolTip.SetToolTip(clearQueryButton,"Clear search")
+        queryBar.Controls.Add(query,0,0) : queryBar.Controls.Add(clearQueryButton,1,0)
+        searchButton.Text="Search" : searchButton.Dock=DockStyle.Fill
+        bar.Controls.Add(queryBar,0,0) : bar.Controls.Add(searchButton,1,0) : layout.Controls.Add(bar,0,1)
+        AddHandler clearQueryButton.Click, Sub(s,e)
+            query.Clear() : query.Focus()
+        End Sub
         Dim filters As New FlowLayoutPanel With {.Dock=DockStyle.Fill}
         category.DropDownStyle=ComboBoxStyle.DropDownList : category.Items.AddRange(New Object(){"all","documents","pictures","music","videos","other"}) : category.SelectedIndex=0
         share.DropDownStyle=ComboBoxStyle.DropDownList : share.Items.AddRange(New Object(){"all","Documents","Pictures","Music","Videos"}) : share.SelectedIndex=0
@@ -142,7 +157,10 @@ Public Class SearchWindow
         AddHandler nextButton.Click, Async Sub(s,e)
             offset+=20 : Await RunSearch(False,activeLiveSearch)
         End Sub
-        AddHandler query.TextChanged, Sub(s,e) ScheduleLiveSearch()
+        AddHandler query.TextChanged, Sub(s,e)
+            clearQueryButton.Enabled=(query.TextLength>0)
+            ScheduleLiveSearch()
+        End Sub
         AddHandler liveTimer.Tick, Async Sub(s,e)
             liveTimer.Stop() : offset=0 : Await RunSearch(True,True)
         End Sub
