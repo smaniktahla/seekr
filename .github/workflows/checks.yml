@@ -10,8 +10,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m unittest discover -s . -p test_core.py -v
-      - run: python -m compileall -q core.py extract.py indexer.py worker.py server.py start.py mcp_proxy.py
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s . -p 'test_*.py' -v
+      - run: python -m compileall -q core.py extract.py indexer.py worker.py server.py start.py mcp_proxy.py settings.py service.py docmost.py locking.py
   windows:
     runs-on: windows-latest
     steps:

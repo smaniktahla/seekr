@@ -10,6 +10,7 @@ services:
     env_file: .env
     environment:
       ARCHIVE_DB: /data/archive.sqlite
+      ARCHIVE_ALLOWED_ROOT: /archive
       EMBEDDING_URL: ${EMBEDDING_URL:-http://host.docker.internal:11434}
     volumes:
       - ${ARCHIVE_DATA_ROOT:-/mnt/tank}/Documents:/archive/Documents:ro

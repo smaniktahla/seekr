@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "sources": [
+    {"id": "Documents", "path": "/archive/Documents", "client_path": "\\\\your-nas\\Documents", "enabled": true},
+    {"id": "Music", "path": "/archive/Music", "client_path": "\\\\your-nas\\Music", "enabled": true}
+  ],
+  "dedupe": {"enabled": false},
+  "docmost": {
+    "enabled": false,
+    "mcp_url": "http://docmost-mcp-host:8012/mcp",
+    "semantic_url": "http://docmost-search-host:8099",
+    "app_url": "http://docmost-host:3121",
+    "page_url_template": ""
+  }
+}

@@ -1,10 +1,18 @@
-import sys,json,subprocess,zipfile,xml.etree.ElementTree as ET
+import sys,json,subprocess,zipfile,xml.etree.ElementTree as ET,shutil
 from pathlib import Path
 CAP=300000
 
 def extract(path):
     p=Path(path); e=p.suffix.lower(); text=''; meta={}; state='indexed'
     if e=='.pdf':
+        if not shutil.which('pdftotext'):
+            from pypdf import PdfReader
+            parts=[];size=0
+            for page in PdfReader(p).pages[:500]:
+                part=page.extract_text() or '';parts.append(part);size+=len(part)
+                if size>=CAP:break
+            text='\n'.join(parts)
+            return {'text':text[:CAP],'metadata':json.dumps({'extractor':'pypdf','page_limit':500,'text_truncated':size>=CAP}),'state':'indexed' if text.strip() else 'needs_ocr'}
         # Limit pages and stream output into a bounded buffer; no shell, no macros.
         proc=subprocess.Popen(['pdftotext','-f','1','-l','500','-layout',str(p),'-'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
         raw=proc.stdout.read(CAP*4); proc.stdout.close(); proc.terminate(); proc.wait(timeout=3)
@@ -57,9 +65,18 @@ def extract(path):
         if audio:
             meta={str(k):v for k,v in (audio.tags or {}).items()}; meta['duration_seconds']=round(audio.info.length,2)
     elif e in {'.jpg','.jpeg','.png','.heic','.tif','.tiff','.gif','.webp','.cr2','.dng'}:
+        if not shutil.which('exiftool'):
+            from PIL import Image,ExifTags
+            with Image.open(p) as image:
+                meta={'width':image.width,'height':image.height}
+                for key,value in image.getexif().items():
+                    name=ExifTags.TAGS.get(key,str(key))
+                    if name in ('DateTime','DateTimeOriginal','Make','Model','ImageDescription'):meta[name]=str(value)
+            return {'text':'','metadata':json.dumps(meta),'state':'indexed'}
         r=subprocess.run(['exiftool','-json','-DateTimeOriginal','-CreateDate','-ImageWidth','-ImageHeight','-Make','-Model','-Description','-Subject','-Keywords','-GPSLatitude','-GPSLongitude',str(p)],capture_output=True,timeout=12)
         meta=json.loads(r.stdout or b'[{}]')[0]; meta.pop('SourceFile',None)
     elif e in {'.mp4','.mkv','.avi','.mov','.m4v','.mpg','.mpeg','.webm','.3gp'}:
+        if not shutil.which('ffprobe'):return {'text':'','metadata':json.dumps({'metadata_unavailable':'Install ffprobe to extract video metadata'}),'state':'metadata_only'}
         r=subprocess.run(['ffprobe','-v','quiet','-show_format','-of','json',str(p)],capture_output=True,timeout=12)
         meta=json.loads(r.stdout or b'{}').get('format',{}); meta.pop('filename',None)
     else: state='metadata_only'

@@ -74,6 +74,40 @@ Windows can instead use `--dpapi-file C:\ArchiveSearch\archive-token.dpapi`. Reg
 
 ## Tests and contributions
 
+## Settings, configurable folders, exact duplicates, and DocMost
+
+The Windows **Settings...** dialog edits the selected service's source folders, duplicate visibility and DocMost connection. Its connection section can switch between the NAS endpoint and a localhost service; a different token can be entered without writing it to plain-text configuration. Per-service tokens are encrypted with Windows DPAPI. No source paths or credentials belong in this public repository.
+
+Each source has a stable ID, a **server folder** the indexing service can read, an **open path** used by Windows, and an enabled flag. Existing default IDs preserve the original index paths. Disabling a source hides its results without deleting originals. Removing a source or changing its root removes only its indexed records and queues a rescan. Saving requires authenticated service access. The live configuration is stored atomically in `data/settings.json` (or `ARCHIVE_SETTINGS`), not in the repository. `settings.example.json` documents the schema.
+
+For Docker on a NAS, folders must already be mounted read-only inside `/archive`; the Settings dialog cannot create Docker mounts. `ARCHIVE_ALLOWED_ROOT=/archive` restricts configurable roots in the supplied Compose stack. Set the Windows open path to the corresponding SMB path. A NAS service cannot read a laptop `C:` folder.
+
+For native Windows indexing, start a local service explicitly:
+
+```powershell
+./scripts/run-local.ps1 -Folders 'C:\YourDocuments','\\your-nas\Documents' -ClientInstallDirectory C:\ArchiveSearch
+```
+
+The launcher creates an isolated Python environment, installs requirements, creates a separate local index under Local AppData, and listens on loopback only. It reuses the current user's DPAPI-protected client token without putting it in process arguments. It runs in the foreground; Ctrl+C stops it. Existing local settings are preserved on subsequent launches; edit them from Settings. Choose **Use local** in Settings to connect. The local service may index both local and accessible SMB directories under the Windows user's permissions. This release switches between service indexes; it does not federate independent laptop and NAS indexes.
+
+Modern Office, PDF, text, image and audio extraction have native Python paths. Legacy Word/PowerPoint and RTF need external `antiword`/`catppt`/`unrtf` utilities. Install `ffprobe` for video metadata and ExifTool for broader image formats; without optional helpers some formats remain filename/metadata-only or report an extraction failure. OCR and video transcription remain out of scope.
+
+**Hide exact duplicate files** uses SHA-256 hashes computed in the background only for size-collision candidates. Same name/size alone never hides a result. Unhashed or changed files remain visible until verified. No originals are deleted. Turn the option off to show all copies. Hashing large duplicate candidates can require substantial disk reads. Deduplication chooses a representative from the current matching set, so a matching filename is not hidden just because a different copy has another name. The grouping happens within each service, not across independent local/NAS indexes.
+
+The optional **DocMost** connector uses only MCP `search_notes` / `get_note`, plus the provided read-only semantic search API. It never writes notes, logs into DocMost, or accesses Postgres. Normal full-text searches interleave file and note results with stable pagination. Live typing searches file paths; selecting the DocMost source explicitly uses DocMost's word matching. Semantic DocMost results follow its own ingestion schedule. Results are capped at 20 notes per query and multiple matching chunks from one note are grouped. Connector outages leave file results available with a warning. DocMost endpoint URLs are private runtime settings; archive authentication is not forwarded to them.
+
+Notes can be read in Seekr's preview. **Open** launches the configured DocMost app. For a direct page link, supply a verified HTTP(S) page URL template containing `{id}`; the connector does not invent a deep-link route from the note ID.
+
+Upgrade both the NAS backend and Windows executable for these settings features. Database migration adds nullable hash fields without changing originals. Keep `data/` and the authentication token; rebuild the container from the updated source. No DocMost restart is needed. The previous clear-search button is included in this feature branch.
+
+### Validation
+
+Run all regressions, including the optional authenticated API tests when service dependencies are installed:
+
+```sh
+python -m unittest discover -s . -p 'test_*.py' -v
+```
+
 ```sh
 python -m unittest discover -s . -p test_core.py -v
 ```
