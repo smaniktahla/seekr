@@ -14,5 +14,7 @@ dist/
 client.json
 filters.json
 inventory*.json
+settings.json
+service.json
 .env.*
 !.env.example

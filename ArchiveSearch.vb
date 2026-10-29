@@ -14,12 +14,15 @@ Imports System.Threading.Tasks
 Public Class SearchWindow
     Inherits Form
     Private ReadOnly query As New TextBox()
+    Private ReadOnly clearQueryButton As New Button()
+    Private ReadOnly searchToolTip As New ToolTip()
     Private ReadOnly category As New ComboBox()
     Private ReadOnly share As New ComboBox()
     Private ReadOnly mode As New ComboBox()
     Private ReadOnly clearFiltersButton As New Button()
     Private ReadOnly autoClearFilters As New CheckBox()
     Private ReadOnly searchButton As New Button()
+    Private ReadOnly settingsButton As New Button With {.Text="Settings...",.AutoSize=True}
     Private ReadOnly openButton As New Button()
     Private ReadOnly folderButton As New Button()
     Private ReadOnly copyButton As New Button()
@@ -44,10 +47,16 @@ Public Class SearchWindow
     Private searchReady As Boolean = False
     Private resettingFilters As Boolean = False
     Private activeLiveSearch As Boolean = False
-    Private ReadOnly endpoint As String = ResolveEndpoint()
+    Private preferredShare As String = Nothing
+    Private endpoint As String = ResolveEndpoint()
     Private Shared Function ResolveEndpoint() As String
         Dim configured=Environment.GetEnvironmentVariable("ARCHIVE_SEARCH_URL")
         If Not String.IsNullOrWhiteSpace(configured) Then Return configured.TrimEnd("/"c)
+        Dim savedPath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"NASArchiveSearch","service.json")
+        If File.Exists(savedPath) Then
+            Dim saved=New JavaScriptSerializer().Deserialize(Of Dictionary(Of String,String))(File.ReadAllText(savedPath))
+            If saved.ContainsKey("url") Then Return saved("url").TrimEnd("/"c)
+        End If
         Dim configPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"client.json")
         If File.Exists(configPath) Then
             Dim config=New JavaScriptSerializer().Deserialize(Of Dictionary(Of String,String))(File.ReadAllText(configPath))
@@ -68,11 +77,33 @@ Public Class SearchWindow
         layout.RowStyles.Add(New RowStyle(SizeType.Percent,100))
         layout.RowStyles.Add(New RowStyle(SizeType.Absolute,46))
         Dim heading As New Label With {.Text="Archive Search",.Font=New Font("Segoe UI",22,FontStyle.Bold),.AutoSize=True}
-        layout.Controls.Add(heading,0,0)
+        Dim headingBar As New TableLayoutPanel With {.Dock=DockStyle.Fill,.ColumnCount=2,.RowCount=1}
+        headingBar.ColumnStyles.Add(New ColumnStyle(SizeType.Percent,100)) : headingBar.ColumnStyles.Add(New ColumnStyle(SizeType.Absolute,120))
+        headingBar.Controls.Add(heading,0,0) : headingBar.Controls.Add(settingsButton,1,0) : layout.Controls.Add(headingBar,0,0)
+        AddHandler settingsButton.Click, Sub(s,e)
+            Try
+                OpenSettings()
+            Catch ex As Exception
+                MessageBox.Show(ex.Message,"Seekr settings")
+            End Try
+        End Sub
         Dim bar As New TableLayoutPanel With {.Dock=DockStyle.Fill,.ColumnCount=2}
         bar.ColumnStyles.Add(New ColumnStyle(SizeType.Percent,100)) : bar.ColumnStyles.Add(New ColumnStyle(SizeType.Absolute,110))
-        query.Dock=DockStyle.Fill : searchButton.Text="Search" : searchButton.Dock=DockStyle.Fill
-        bar.Controls.Add(query,0,0) : bar.Controls.Add(searchButton,1,0) : layout.Controls.Add(bar,0,1)
+        Dim queryBar As New TableLayoutPanel With {.Dock=DockStyle.Fill,.ColumnCount=2,.RowCount=1,.BackColor=Color.White,.BorderStyle=BorderStyle.FixedSingle,.Padding=New Padding(5,3,2,3)}
+        queryBar.ColumnStyles.Add(New ColumnStyle(SizeType.Percent,100))
+        queryBar.ColumnStyles.Add(New ColumnStyle(SizeType.Absolute,30))
+        query.Dock=DockStyle.Fill : query.BorderStyle=BorderStyle.None
+        clearQueryButton.Text=ChrW(&HD7) : clearQueryButton.Dock=DockStyle.Fill
+        clearQueryButton.FlatStyle=FlatStyle.Flat : clearQueryButton.FlatAppearance.BorderSize=0
+        clearQueryButton.Margin=New Padding(0) : clearQueryButton.Font=New Font("Segoe UI",12)
+        clearQueryButton.AccessibleName="Clear search" : clearQueryButton.Enabled=False
+        searchToolTip.SetToolTip(clearQueryButton,"Clear search")
+        queryBar.Controls.Add(query,0,0) : queryBar.Controls.Add(clearQueryButton,1,0)
+        searchButton.Text="Search" : searchButton.Dock=DockStyle.Fill
+        bar.Controls.Add(queryBar,0,0) : bar.Controls.Add(searchButton,1,0) : layout.Controls.Add(bar,0,1)
+        AddHandler clearQueryButton.Click, Sub(s,e)
+            query.Clear() : query.Focus()
+        End Sub
         Dim filters As New FlowLayoutPanel With {.Dock=DockStyle.Fill}
         category.DropDownStyle=ComboBoxStyle.DropDownList : category.Items.AddRange(New Object(){"all","documents","pictures","music","videos","other"}) : category.SelectedIndex=0
         share.DropDownStyle=ComboBoxStyle.DropDownList : share.Items.AddRange(New Object(){"all","Documents","Pictures","Music","Videos"}) : share.SelectedIndex=0
@@ -124,6 +155,7 @@ Public Class SearchWindow
         End Sub
         AddHandler itemMenu.Opening, Sub(s,e)
             e.Cancel=(Selected() Is Nothing)
+            menuFolder.Enabled=(SelectedPath()<>"")
         End Sub
         split.Panel1.Controls.Add(grid)
         preview.Multiline=True : preview.ReadOnly=True : preview.ScrollBars=ScrollBars.Both : preview.Dock=DockStyle.Fill : preview.Font=New Font("Consolas",10)
@@ -142,7 +174,10 @@ Public Class SearchWindow
         AddHandler nextButton.Click, Async Sub(s,e)
             offset+=20 : Await RunSearch(False,activeLiveSearch)
         End Sub
-        AddHandler query.TextChanged, Sub(s,e) ScheduleLiveSearch()
+        AddHandler query.TextChanged, Sub(s,e)
+            clearQueryButton.Enabled=(query.TextLength>0)
+            ScheduleLiveSearch()
+        End Sub
         AddHandler liveTimer.Tick, Async Sub(s,e)
             liveTimer.Stop() : offset=0 : Await RunSearch(True,True)
         End Sub
@@ -166,12 +201,18 @@ Public Class SearchWindow
         End Sub
         AddHandler Shown, Async Sub(s,e)
             Try
-                Dim keyPath=Path.Combine(Application.StartupPath,"archive-token.dpapi")
+                Dim keyPath=ServiceTokenPath(endpoint)
+                If Not File.Exists(keyPath) Then keyPath=Path.Combine(Application.StartupPath,"archive-token.dpapi")
                 Dim token=Encoding.UTF8.GetString(ProtectedData.Unprotect(File.ReadAllBytes(keyPath),Nothing,DataProtectionScope.CurrentUser)).Trim()
                 http.DefaultRequestHeaders.Authorization=New AuthenticationHeaderValue("Bearer",token)
                 searchReady=True
                 Dim data=Await GetJson("/api/status")
                 info.Text=Convert.ToInt32(data("files")).ToString("N0") & " files available"
+                Try
+                    ApplySourceSettings(Await GetJson("/api/settings"))
+                Catch
+                    ' Older services still support ordinary archive searches.
+                End Try
             Catch ex As Exception
                 If Environment.GetCommandLineArgs().Contains("--smoke") Then
                     File.WriteAllText(Path.Combine(Application.StartupPath,"smoke-result.txt"),"STARTUP ERROR: " & ex.ToString())
@@ -206,6 +247,61 @@ Public Class SearchWindow
         End Sub
     End Sub
 
+    Private Sub ApplySourceSettings(config As Dictionary(Of String,Object))
+        resettingFilters=True
+        Try
+            Dim selectedShare=If(preferredShare,share.Text)
+            preferredShare=Nothing
+            share.Items.Clear() : share.Items.Add("all")
+            For Each item As Object In CType(config("sources"),System.Collections.IEnumerable)
+                Dim source=CType(item,Dictionary(Of String,Object))
+                If Convert.ToBoolean(source("enabled")) Then share.Items.Add(Convert.ToString(source("id")))
+            Next
+            If Convert.ToBoolean(CType(config("docmost"),Dictionary(Of String,Object))("enabled")) Then share.Items.Add("DocMost")
+            share.SelectedItem=If(share.Items.Contains(selectedShare),selectedShare,"all")
+        Finally
+            resettingFilters=False
+        End Try
+    End Sub
+    Private Sub OpenSettings()
+        liveTimer.Stop() : searchGeneration+=1
+        If searchCancellation IsNot Nothing Then searchCancellation.Cancel()
+        searchButton.Enabled=True
+        Dim token=If(http.DefaultRequestHeaders.Authorization Is Nothing,"",http.DefaultRequestHeaders.Authorization.Parameter)
+        Dim statePath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"NASArchiveSearch","service.json")
+        Dim nasUrl=endpoint
+        Try
+            If File.Exists(statePath) Then
+                Dim saved=serializer.Deserialize(Of Dictionary(Of String,String))(File.ReadAllText(statePath))
+                If saved.ContainsKey("nas_url") Then nasUrl=saved("nas_url")
+            End If
+        Catch
+        End Try
+        Using dialog As New SettingsWindow(endpoint,token,nasUrl)
+            If dialog.ShowDialog(Me)<>DialogResult.OK Then Return
+            endpoint=dialog.ServiceUrl
+            http.DefaultRequestHeaders.Authorization=New AuthenticationHeaderValue("Bearer",dialog.Token)
+            Directory.CreateDirectory(Path.GetDirectoryName(statePath))
+            Dim saved As New Dictionary(Of String,String) From {{"url",endpoint},{"nas_url",If(New Uri(endpoint).IsLoopback,nasUrl,endpoint)}}
+            File.WriteAllText(statePath,serializer.Serialize(saved))
+            Dim keyPath=ServiceTokenPath(endpoint)
+            File.WriteAllBytes(keyPath,ProtectedData.Protect(Encoding.UTF8.GetBytes(dialog.Token),Nothing,DataProtectionScope.CurrentUser))
+            ApplySourceSettings(dialog.Configuration)
+            generation+=1 : rows.Clear() : grid.Rows.Clear() : preview.Clear()
+            activeSearchUrl=Nothing : nextButton.Enabled=False : readMore.Enabled=False
+            info.Text="Settings saved. Background indexing will rescan."
+            ScheduleLiveSearch()
+        End Using
+    End Sub
+    Private Shared Function ServiceTokenPath(url As String) As String
+        Dim folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"NASArchiveSearch")
+        Directory.CreateDirectory(folder)
+        Using hash=SHA256.Create()
+            Dim name=BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(url))).Replace("-","").Substring(0,24)
+            Return Path.Combine(folder,"token-" & name & ".dpapi")
+        End Using
+    End Function
+
     Private Function FilterSettingsPath() As String
         Return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"NASArchiveSearch","filters.json")
     End Function
@@ -223,6 +319,8 @@ Public Class SearchWindow
             End If
             If autoClearFilters.Checked Then
                 category.SelectedIndex=0 : share.SelectedIndex=0 : mode.SelectedIndex=0
+            ElseIf saved.ContainsKey("share") Then
+                preferredShare=saved("share")
             End If
         Catch
             ' Missing or invalid preferences leave the first-launch defaults intact.
@@ -294,7 +392,7 @@ Public Class SearchWindow
                 Dim row=CType(item,Dictionary(Of String,Object)) : rows.Add(row)
                 Dim fileType=Convert.ToString(row("ext")).TrimStart("."c).ToUpperInvariant()
                 If fileType="" Then fileType="File"
-                grid.Rows.Add(row("name"),fileType,row("share"),row("state"),row("unc_path"))
+                grid.Rows.Add(row("name"),fileType,row("share"),row("state"),If(row.ContainsKey("open_url"),row("open_url"),row("unc_path")))
             Next
             info.Text=Convert.ToInt32(data("total")).ToString("N0") & If(live," filename matches ("," matches (") & activeSearchType & "); " & Convert.ToString(data("elapsed_ms")) & " ms"
             nextButton.Enabled=offset+20<Convert.ToInt32(data("total")) AndAlso rows.Count>0
@@ -335,6 +433,12 @@ Public Class SearchWindow
     End Sub
     Private Sub OpenOriginal()
         Dim p=SelectedPath()
+        Dim row=Selected()
+        If row IsNot Nothing AndAlso row.ContainsKey("open_url") Then
+            Dim target As Uri=Nothing
+            If Not Uri.TryCreate(Convert.ToString(row("open_url")),UriKind.Absolute,target) OrElse (target.Scheme<>"http" AndAlso target.Scheme<>"https") Then Return
+            p=target.AbsoluteUri
+        End If
         If p="" Then Return
         Try
             Process.Start(New ProcessStartInfo(p) With {.UseShellExecute=True})
@@ -347,7 +451,7 @@ Public Class SearchWindow
         If row Is Nothing Then Return
         generation+=1 : Dim request=generation
         Try
-            Dim id=Convert.ToInt32(row("id"))
+            Dim id=Uri.EscapeDataString(Convert.ToString(row("id")))
             Dim data=Await GetJson("/api/read/" & id & "?offset=" & off)
             If request<>generation Then Return
             preview.Text=Convert.ToString(data("unc_path")) & Environment.NewLine & Convert.ToString(data("metadata")) & Environment.NewLine & Environment.NewLine & Convert.ToString(data("text"))
