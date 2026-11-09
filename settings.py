@@ -8,7 +8,7 @@ def config_path():
 
 def defaults(root):
     return {'version':1,'sources':[{'id':s,'path':str(root/s),'client_path':'\\\\truenas\\'+s,'enabled':True} for s in ('Documents','Pictures','Music','Videos')],
-            'dedupe':{'enabled':False},'docmost':{'enabled':False,'mcp_url':'','semantic_url':'','app_url':'','page_url_template':''}}
+            'dedupe':{'enabled':False},'google_drive':{'enabled':False,'include_shared':True},'docmost':{'enabled':False,'mcp_url':'','semantic_url':'','app_url':'','page_url_template':''}}
 
 def load(root):
     base=defaults(root)
@@ -19,12 +19,14 @@ def load(root):
 
 def validate(data):
     clean={'version':1,'sources':[],'dedupe':{'enabled':bool(data.get('dedupe',{}).get('enabled',False))},'docmost':{}}
+    gd=data.get('google_drive',{})
+    clean['google_drive']={'enabled':bool(gd.get('enabled',False)),'include_shared':bool(gd.get('include_shared',True))}
     used=set()
     if not isinstance(data.get('sources'),list) or len(data['sources'])>100: raise ValueError('Provide up to 100 index folders')
     for item in data['sources']:
         ident=str(item.get('id','')).strip(); path=str(item.get('path','')).strip(); client=str(item.get('client_path','')).strip()
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,60}',ident) or ident.casefold() in used: raise ValueError('Each folder needs a unique ID using letters, digits, hyphens or underscores')
-        if ident.casefold() in ('all','docmost'):raise ValueError('Folder ID is reserved for a search filter')
+        if ident.casefold() in ('all','docmost','googledrive'):raise ValueError('Folder ID is reserved for a search filter')
         if not Path(path).is_absolute(): raise ValueError('Index paths must be absolute paths on the selected service machine')
         allowed=os.getenv('ARCHIVE_ALLOWED_ROOT')
         if allowed and not Path(path).resolve().is_relative_to(Path(allowed).resolve()):raise ValueError('Index folder must be inside the service allowed root')

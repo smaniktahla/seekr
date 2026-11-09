@@ -258,6 +258,7 @@ Public Class SearchWindow
                 If Convert.ToBoolean(source("enabled")) Then share.Items.Add(Convert.ToString(source("id")))
             Next
             If Convert.ToBoolean(CType(config("docmost"),Dictionary(Of String,Object))("enabled")) Then share.Items.Add("DocMost")
+            If config.ContainsKey("google_drive") AndAlso Convert.ToBoolean(CType(config("google_drive"),Dictionary(Of String,Object))("enabled")) Then share.Items.Add("GoogleDrive")
             share.SelectedItem=If(share.Items.Contains(selectedShare),selectedShare,"all")
         Finally
             resettingFilters=False

@@ -19,6 +19,12 @@ Public Class SettingsWindow
     Private ReadOnly semanticBox As New TextBox()
     Private ReadOnly appBox As New TextBox()
     Private ReadOnly linkBox As New TextBox()
+    Private ReadOnly driveBox As New CheckBox With {.Text="Include Google Drive in full-text searches",.AutoSize=True}
+    Private ReadOnly sharedBox As New CheckBox With {.Text="Include files shared with me and shared drives",.AutoSize=True,.Checked=True}
+    Private ReadOnly driveStatus As New Label With {.AutoSize=True}
+    Private ReadOnly connectDrive As New Button With {.Text="Connect Google Drive...",.AutoSize=True}
+    Private ReadOnly importDrive As New Button With {.Text="Import Desktop OAuth client JSON...",.AutoSize=True}
+    Private ReadOnly disconnectDrive As New Button With {.Text="Disconnect",.AutoSize=True}
     Private ReadOnly saveButton As New Button With {.Text="Save",.AutoSize=True,.Enabled=False}
     Private ReadOnly loadButton As New Button With {.Text="Load service settings",.AutoSize=True}
     Private ReadOnly statusLabel As New Label With {.AutoSize=True}
@@ -102,7 +108,17 @@ Public Class SettingsWindow
         AddField(dmLayout,3,"DocMost app URL",appBox) : AddField(dmLayout,4,"Page URL template",linkBox)
         dmLayout.Controls.Add(New Label With {.Text="Read-only: search_notes and get_note only. No database writes or credentials are needed for the existing LAN endpoints. Semantic results follow DocMost's ingestion schedule. Typing searches files; Enter includes DocMost. Up to 20 DocMost notes are included per query.",.Dock=DockStyle.Fill},1,5)
         dmLayout.Controls.Add(New Label With {.Text="Optional page URL template must contain {id}. Without it, Open launches the DocMost app; the note is still readable in Seekr's preview.",.Dock=DockStyle.Fill},1,6)
-        dmTab.Controls.Add(dmLayout) : tabs.TabPages.Add(dmTab) : root.Controls.Add(tabs,0,1)
+        dmTab.Controls.Add(dmLayout) : tabs.TabPages.Add(dmTab)
+        Dim gdTab As New TabPage("Google Drive")
+        Dim gdLayout As New FlowLayoutPanel With {.Dock=DockStyle.Fill,.FlowDirection=FlowDirection.TopDown,.WrapContents=False,.Padding=New Padding(15)}
+        gdLayout.Controls.Add(driveBox) : gdLayout.Controls.Add(sharedBox)
+        gdLayout.Controls.Add(New Label With {.Text="Create a Google Cloud Desktop OAuth client with the Drive API enabled, then import its JSON. Connect opens Google's consent page in your browser and requests read-only Drive access. Credentials are stored privately on the selected search service.",.Size=New Size(660,80)})
+        gdLayout.Controls.Add(importDrive) : gdLayout.Controls.Add(connectDrive) : gdLayout.Controls.Add(disconnectDrive) : gdLayout.Controls.Add(driveStatus)
+        gdLayout.Controls.Add(New Label With {.Text="Enter includes Google keyword/content search (up to 50 results). Select GoogleDrive to search names while typing. Google Docs, Sheets (first sheet), Slides and small text files support previews; other files open in the browser. Duplicate grouping applies to indexed files only. Disconnect forgets stored credentials; revoke access separately in your Google account.",.Size=New Size(660,95)})
+        gdTab.Controls.Add(gdLayout) : tabs.TabPages.Add(gdTab) : root.Controls.Add(tabs,0,1)
+        AddHandler importDrive.Click, Async Sub(s,e) Await DriveAction("configure")
+        AddHandler connectDrive.Click, Async Sub(s,e) Await DriveAction("connect")
+        AddHandler disconnectDrive.Click, Async Sub(s,e) Await DriveAction("disconnect")
         Dim footer As New FlowLayoutPanel With {.Dock=DockStyle.Fill}
         Dim cancel As New Button With {.Text="Cancel",.DialogResult=DialogResult.Cancel,.AutoSize=True}
         footer.Controls.AddRange(New Control(){saveButton,cancel,statusLabel}) : root.Controls.Add(footer,0,2)
@@ -139,6 +155,38 @@ Public Class SettingsWindow
             End Using
         End Using
     End Function
+    Private Sub ShowDriveStatus(result As Dictionary(Of String,Object))
+        driveStatus.Text=If(Convert.ToBoolean(result("connected")),"Connected (read-only)",If(Convert.ToBoolean(result("client_configured")),"OAuth client configured; click Connect.","Import a Desktop OAuth client JSON to begin."))
+    End Sub
+    Private Async Function DriveAction(action As String) As Task
+        If loadedUrl<>ServiceUrl Then MessageBox.Show("Load settings for this service first.","Google Drive") : Return
+        connectDrive.Enabled=False : importDrive.Enabled=False : disconnectDrive.Enabled=False : saveButton.Enabled=False : serviceUrlBox.Parent.Enabled=False
+        ControlBox=False : CType(CancelButton,Control).Enabled=False
+        Try
+            Dim result As Dictionary(Of String,Object)=Nothing
+            If action="configure" Then
+                Using dialog As New OpenFileDialog With {.Filter="Google OAuth client (*.json)|*.json",.Title="Import Google Desktop OAuth client"}
+                    If dialog.ShowDialog(Me)<>DialogResult.OK Then Return
+                    Dim info As New System.IO.FileInfo(dialog.FileName)
+                    If info.Length>65536 Then Throw New Exception("OAuth client JSON is too large.")
+                    result=Await Request(HttpMethod.Post,"/api/google-drive/configure",serializer.Deserialize(Of Dictionary(Of String,Object))(System.IO.File.ReadAllText(dialog.FileName)))
+                End Using
+            ElseIf action="connect" Then
+                driveStatus.Text="Waiting for Google consent in your browser..."
+                Dim response=Await GoogleDriveLogin.Authorize(Function(callback) Request(HttpMethod.Post,"/api/google-drive/begin",New Dictionary(Of String,Object) From {{"redirect_uri",callback}}))
+                result=Await Request(HttpMethod.Post,"/api/google-drive/complete",response)
+                driveBox.Checked=True
+            Else
+                result=Await Request(HttpMethod.Post,"/api/google-drive/disconnect",New Dictionary(Of String,Object))
+                driveBox.Checked=False
+            End If
+            ShowDriveStatus(result)
+        Catch ex As Exception
+            driveStatus.Text="Connection incomplete" : MessageBox.Show(ex.Message,"Google Drive")
+        Finally
+            connectDrive.Enabled=True : importDrive.Enabled=True : disconnectDrive.Enabled=True : saveButton.Enabled=True : serviceUrlBox.Parent.Enabled=True : ControlBox=True : CType(CancelButton,Control).Enabled=True
+        End Try
+    End Function
     Private Async Function LoadConfiguration() As Task
         loadButton.Enabled=False : saveButton.Enabled=False : statusLabel.Text="Loading..."
         Try
@@ -153,6 +201,11 @@ Public Class SettingsWindow
             docmostBox.Checked=Convert.ToBoolean(dm("enabled"))
             mcpBox.Text=Convert.ToString(dm("mcp_url")) : semanticBox.Text=Convert.ToString(dm("semantic_url"))
             appBox.Text=Convert.ToString(dm("app_url")) : linkBox.Text=Convert.ToString(dm("page_url_template"))
+            If result.ContainsKey("google_drive") Then
+                Dim gd=CType(result("google_drive"),Dictionary(Of String,Object))
+                driveBox.Checked=Convert.ToBoolean(gd("enabled")) : sharedBox.Checked=Convert.ToBoolean(gd("include_shared"))
+                ShowDriveStatus(CType(result("google_drive_status"),Dictionary(Of String,Object)))
+            End If
             loadedUrl=ServiceUrl : saveButton.Enabled=True : statusLabel.Text="Loaded. Save queues an incremental rescan."
         Catch ex As Exception
             statusLabel.Text="Could not load settings" : MessageBox.Show(ex.Message,"Seekr settings")
@@ -171,6 +224,7 @@ Public Class SettingsWindow
                 items.Add(New Dictionary(Of String,Object) From {{"id",Convert.ToString(row.Cells(0).Value)},{"path",Convert.ToString(row.Cells(1).Value)},{"client_path",Convert.ToString(row.Cells(2).Value)},{"enabled",Convert.ToBoolean(If(row.Cells(3).Value,False))}})
             Next
             Dim config As New Dictionary(Of String,Object) From {{"sources",items},{"dedupe",New Dictionary(Of String,Object) From {{"enabled",duplicateBox.Checked}}},{"docmost",New Dictionary(Of String,Object) From {{"enabled",docmostBox.Checked},{"mcp_url",mcpBox.Text},{"semantic_url",semanticBox.Text},{"app_url",appBox.Text},{"page_url_template",linkBox.Text}}}}
+            config("google_drive")=New Dictionary(Of String,Object) From {{"enabled",driveBox.Checked},{"include_shared",sharedBox.Checked}}
             Configuration=Await Request(HttpMethod.Put,"/api/settings",config)
             DialogResult=DialogResult.OK : Close()
         Catch ex As Exception

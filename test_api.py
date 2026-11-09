@@ -27,5 +27,13 @@ class ApiTests(unittest.TestCase):
         config={'sources':[{'id':'Local','path':'relative'}]}
         response=self.client.put('/api/settings',json=config,headers=self.headers)
         self.assertEqual(response.status_code,400);self.assertFalse(settings.config_path().exists())
+    def test_google_auth_routes_require_archive_auth_and_redact_errors(self):
+        self.assertEqual(self.client.post('/api/google-drive/begin',json={}).status_code,401)
+        response=self.client.post('/api/google-drive/begin',json={'redirect_uri':'https://example.test'},headers=self.headers)
+        self.assertEqual(response.status_code,400)
+        with patch.object(server.drive_auth,'complete',side_effect=Exception('synthetic-secret-token')):
+            response=self.client.post('/api/google-drive/complete',json={'state':'x','code':'private-code'},headers=self.headers)
+        self.assertEqual(response.status_code,400);self.assertNotIn('synthetic-secret-token',response.text);self.assertNotIn('private-code',response.text)
+        self.assertEqual(self.client.post('/api/google-drive/disconnect',json={},headers=self.headers).headers['cache-control'],'no-store')
 
 if __name__=='__main__':unittest.main()
