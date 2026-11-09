@@ -16,5 +16,9 @@ filters.json
 inventory*.json
 settings.json
 service.json
+credentials/
+client_secret*.json
+token.json
+.venv/
 .env.*
 !.env.example

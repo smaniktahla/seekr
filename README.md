@@ -100,6 +100,22 @@ Notes can be read in Seekr's preview. **Open** launches the configured DocMost a
 
 Upgrade both the NAS backend and Windows executable for these settings features. Database migration adds nullable hash fields without changing originals. Keep `data/` and the authentication token; rebuild the container from the updated source. No DocMost restart is needed. The previous clear-search button is included in this feature branch.
 
+## Google Drive (OAuth, read-only)
+
+Google Drive is an optional live connector, available to the Windows client and the existing search MCP. Update both the backend and Windows client, then open **Settings > Google Drive** for the selected service. This uses its own Google authorization; a connection in an AI assistant does not supply credentials to Seekr.
+
+1. In a Google Cloud project, enable the **Google Drive API** and configure its OAuth consent screen/audience. For a personal External app in Testing, add your Google account as a test user.
+2. Create an OAuth client with application type **Desktop app** and download its JSON. Do not use a Web application or service-account credential.
+3. In Settings, choose **Import Desktop OAuth client JSON**, then **Connect Google Drive**. The normal browser opens Google's consent page. Sign in and grant read-only Drive access, then return to Seekr and **Save**.
+
+The authorization-code flow uses PKCE (S256), random state, a five-minute server-side expiry and a one-use exchange. The Windows callback listens only on an ephemeral `127.0.0.1` port, without an administrator URL reservation; the selected backend exchanges the code. NAS users need no public callback URL or inbound port on the NAS. Scope: `https://www.googleapis.com/auth/drive.readonly`. This scope reads files across Drive; `drive.file` cannot search the existing repository. Google may require app verification for broader distribution. External projects in Testing normally issue refresh tokens that expire after seven days for this scope; reconnect or configure the project's publishing status appropriately. See [Google desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app) and [token expiry rules](https://developers.google.com/identity/protocols/oauth2#expiration).
+
+OAuth client and refresh credentials are separate private files in `credentials/` beside the service's settings file, never in the settings API, index, repository, or Windows client response. Linux uses directory mode 700 / files 600; a Windows backend encrypts them with DPAPI for the service's Windows user. Preserve that private directory during upgrades and do not put it in a public backup. Use HTTPS for a remotely hosted search service on an untrusted network. **Disconnect** forgets the backend refresh credential and pending sign-ins; revoke the application's grant in your Google account to remove permission at Google. Importing a different client disconnects the previous account. Authorization changes apply immediately; the enable/shared-file settings take effect on Save.
+
+Enter/full-text searches interleave file, DocMost and Drive results. Typing stays local unless **GoogleDrive** is explicitly selected; Drive then uses Google's name matching (prefix semantics), rather than local path substring matching. Drive uses Google's `fullText` index for full-text, including when local semantic/hybrid mode is selected; it is not embedded in Seekr's index. Results are bounded to 50 Drive files per query and cached for 30 seconds for pagination/quota use. Narrow a query to find additional results. Shared files and shared drives can be included, or search can be limited to files owned by the account. Outages leave indexed-file results available with a warning.
+
+Open launches the returned Google link in the default browser. Previews support Google Docs, Slides, Sheets (CSV of the first sheet only), and small text files when download is permitted, capped at 2 MB. Other formats show metadata and open in Google's viewer. Local/NAS duplicate grouping does not merge cloud results. Drive calls are read-only: no uploads, edits, permission changes, or file deletions. Connect and Disconnect work against the currently selected service; connecting one backend does not authorize another.
+
 ### Validation
 
 Run all regressions, including the optional authenticated API tests when service dependencies are installed:

@@ -3,6 +3,11 @@
 build
 dist
 data
+.venv
+credentials
+client_secret*.json
+token.json
+settings.json
 .env
 *.dpapi
 client.json
